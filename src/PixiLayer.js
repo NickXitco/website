@@ -11,8 +11,8 @@ const ROWS = 22;
 const COLS = 28;
 const X_OFFSET = 768.75;
 const Y_OFFSET = 46.5;
-const SPACING = 25;
-const SIZE = 26.25;
+const SPACING = 35;
+const SIZE = 36.25;
 
 class PixiLayer extends React.Component {
     constructor(props) {
@@ -21,6 +21,7 @@ class PixiLayer extends React.Component {
         this.setup = this.setup.bind(this);
         this.draw = this.draw.bind(this);
         this.resizeHandler = this.resizeHandler.bind(this);
+        this.mousePressed = this.mousePressed.bind(this);
     }
 
     draw() {
@@ -31,12 +32,26 @@ class PixiLayer extends React.Component {
         let minY = Infinity;
         let maxY = -Infinity;
 
+        const mp = this.app.renderer.plugins.interaction.mouse.global;
+
         for (const a of this.glircleObjects) {
             minX = Math.min(a.x, minX);
             minY = Math.min(a.y, minY);
             maxX = Math.max(a.x, maxX);
             maxY = Math.max(a.y, maxY);
         }
+
+        for (const a of this.image.targetDots) {
+            minX = Math.min(a.x, minX);
+            minY = Math.min(a.y, minY);
+            maxX = Math.max(a.x, maxX);
+            maxY = Math.max(a.y, maxY);
+        }
+
+        minX = Math.min(mp.x, minX);
+        minY = Math.min(mp.y, minY);
+        maxX = Math.max(mp.x, maxX);
+        maxY = Math.max(mp.y, maxY);
 
         const radius = Math.max(maxX - minX, maxY - minY) / 2;
         const root = new Quad((maxX + minX) / 2, (maxY + minY) / 2, radius);
@@ -45,146 +60,66 @@ class PixiLayer extends React.Component {
             root.insert(a);
         }
 
+        this.graphics.lineStyle(2, 0x77EBEE, 1);
+        for (const dot of this.image.targetDots) {
+            //this.graphics.drawCircle(dot.x, dot.y, SIZE / 4);
+            //root.insert(dot)
+        }
+
+        this.graphics.lineStyle(2, 0x88AA22, 1);
+        this.graphics.drawCircle(mp.x, mp.y, SIZE / 4);
+        root.insert(mp);
+
         this.graphics.lineStyle(2, 0xFEEB77, 1);
         this.graphics.drawRect(root.x - root.r, root.y - root.r, root.r * 2, root.r * 2);
-        this.graphics.drawRect(this.image.x, this.image.y, this.image.x + this.image.w, this.image.y + this.image.h);
-
-        //TODO show an error at the mouse pointer of the current force acting on it
-
-        const mp = this.app.renderer.plugins.interaction.mouse.global;
-        let mpX = 0;
-        let mpY = 0;
-
-        if (this.image.inImage(mp.x, mp.y)) {
-            const sample = this.image.sample(mp.x, mp.y);
-
-            if (!sample.inImage) {
-                this.graphics.drawRect(0, 0, 150, 150);
-            }
-
-            mpX += sample.fX / 10;
-            mpY += sample.fY / 10;
-        } else {
-            this.graphics.drawRect(0, 0, 50, 50);
-        }
-
-        // const a = mp;
-        // const destPoint = {x: this.image.x + this.image.w / 2, y: this.image.y + this.image.h / 2};
-        // const mag = Math.hypot(destPoint.x - a.x, destPoint.y - a.y) / 100000;
-        //
-        // mpX += mag * (destPoint.x - a.x);
-        // mpY += mag * (destPoint.y - a.y);
-
-        this.graphics.moveTo(mp.x, mp.y);
-        this.graphics.lineTo(mp.x + mpX * 500, mp.y + mpY * 500);
-
-        for (const a of root.getInRadius(mp.x, mp.y, 50)) {
-            const mag = 10 / (Math.hypot(mp.x - a.x, mp.y - a.y) ** 2);
-            a.vx += mag * (a.x - mp.x);
-            a.vy += mag * (a.y - mp.y);
-        }
+        this.graphics.lineStyle(2, 0xAEEB77, 1);
+        this.graphics.drawRect(this.image.x, this.image.y, this.image.w, this.image.h);
 
         for (const a of this.glircleObjects) {
-            for (const b of a.neighbors) {
-                this.graphics.moveTo(a.x, a.y);
-                this.graphics.lineTo(b.x, b.y);
+            //find closest unoccupied dot
+            let closest = null;
+            let closestDist = Infinity;
+            for (const v of this.image.targetDots) {
+                const dist = a.dist(v);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closest = v;
+                }
+            }
+
+            if (closest) {
+                a.vx += Math.cos(a.angle(closest)) * closestDist * 0.01;
+                a.vy += Math.sin(a.angle(closest)) * closestDist * 0.01;
+            } else {
+                //go to center of image
+                if (this.image.ready) {
+                    const img = {x:this.image.x + this.image.w * 0.5, y: this.image.y + this.image.h * 0.5}
+                    a.vx += Math.cos(a.angle(img)) * 0.01;
+                    a.vy += Math.sin(a.angle(img)) * 0.01;
+                }
             }
         }
 
+
         //Spring electric
-        const K = 25;
+        const K = SPACING * 1.5;
         const C = 0.2;
 
         //repulsion
         for (const a of this.glircleObjects) {
-            const nodes = root.getInRadius(a.x, a.y, 50);
+            const nodes = root.getInRadius(a.x, a.y, SIZE / 4);
             for (const b of nodes) {
                 if (a === b) continue;
                 const f = (-1 * C * K * K) / a.dist(b);
-                a.vx += Math.cos(a.angle(b)) * f * 0.01;
-                a.vy += Math.sin(a.angle(b)) * f * 0.01;
+                a.vx += Math.cos(a.angle(b)) * f * 0.025;
+                a.vy += Math.sin(a.angle(b)) * f * 0.025;
             }
-        }
-
-        //attraction
-        for (const a of this.glircleObjects) {
-            for (const b of a.neighbors) {
-                let f = (a.dist(b) ** 2) / K;
-                a.vx += Math.cos(a.angle(b)) * f * 0.05;
-                a.vy += Math.sin(a.angle(b)) * f * 0.05;
-            }
-        }
-
-        let averagePoint = {x: 0, y: 0};
-        for (const a of this.glircleObjects) {
-            averagePoint.x += a.x;
-            averagePoint.y += a.y;
-        }
-
-        averagePoint.x /= this.glircleObjects.length;
-        averagePoint.y /= this.glircleObjects.length;
-
-        //Attract the edges of the net to the edges of the image
-        function attract(a, b) {
-            let f = (Math.hypot(a.x - b.x, a.y - b.y) ** 2) / K;
-            a.vx += Math.cos(a.angle(b)) * f * 0.05;
-            a.vy += Math.sin(a.angle(b)) * f * 0.05;
-        }
-
-        //Top edge
-        for (let i = 0; i < COLS; i++) {
-            const v = this.glircleObjects[i];
-            const imageSpot = {x: this.image.x + (i / (COLS - 1)) * this.image.w, y: this.image.y};
-            attract(v, imageSpot);
-        }
-
-        //Left edge
-        for (let i = 0; i < ROWS; i++) {
-            const v = this.glircleObjects[i * COLS];
-            const imageSpot = {x: this.image.x, y: this.image.y + (i / (ROWS - 1)) * this.image.h};
-            attract(v, imageSpot);
-        }
-
-        //Bottom edge
-        for (let i = 0; i < COLS; i++) {
-            const v = this.glircleObjects[i + (COLS * (ROWS - 1))];
-            const imageSpot = {x: this.image.x + (i / (COLS - 1)) * this.image.w, y: this.image.y + this.image.h};
-            attract(v, imageSpot);
-        }
-
-        //Right edge
-        for (let i = 0; i < ROWS; i++) {
-            const v = this.glircleObjects[i * COLS + (COLS - 1)];
-            const imageSpot = {x: this.image.x + this.image.w, y: this.image.y + (i / (ROWS - 1)) * this.image.h};
-            attract(v, imageSpot);
         }
 
 
         if (this.image.ready) {
-            //Attractor for the center of the grid to the center of the image
-            const imageCenter = {x: this.image.x + 0.5 * this.image.w, y: this.image.y + 0.5 * this.image.h};
-            let f = Math.hypot(averagePoint.x - imageCenter.x, averagePoint.y - imageCenter.y);
-
             for (const a of this.glircleObjects) {
-                a.vx += Math.cos(a.angle(imageCenter)) * f * 0.01;
-                a.vy += Math.sin(a.angle(imageCenter)) * f * 0.01;
-
-                if (this.image.inImage(a.x, a.y)) {
-                    const sample = this.image.sample(a.x, a.y);
-
-                    a.sprite.alpha = sample.a ** 4;
-                    a.sprite.tint = this.image.r * 0x010000 + this.image.g * 0x000100 + this.image.b * 1;
-                    a.vx += sample.fX * 5;
-                    a.vy += sample.fY * 5;
-
-                    if (sample.fX === 0 && sample.fY === 0) {
-                        a.vx /= 1.2;
-                        a.vy /= 1.2;
-                    }
-
-                } else {
-                    a.sprite.alpha = 0;
-                }
+                a.sprite.tint = this.image.r * 0x010000 + this.image.g * 0x000100 + this.image.b * 1;
             }
         }
 
@@ -193,11 +128,17 @@ class PixiLayer extends React.Component {
             a.vy = Math.max(Math.min(a.vy, 15), -15);
             a.x += a.vx;
             a.y += a.vy;
-            a.vx /= 1.05;
-            a.vy /= 1.05;
+            a.vx /= 1.1;
+            a.vy /= 1.1;
             a.sprite.x = a.x;
             a.sprite.y = a.y;
         }
+    }
+
+    mousePressed(e) {
+        const mp = this.app.renderer.plugins.interaction.mouse.global;
+        this.image.targetDots.push({x: mp.x, y: mp.y});
+        console.log(JSON.stringify(this.image.targetDots));
     }
 
     setup() {
@@ -221,7 +162,7 @@ class PixiLayer extends React.Component {
         this.glircleObjects = [];
 
         const vfX = 700
-        const vfY = 200
+        const vfY = 800
         const vfSprite = new PIXI.Sprite(vfTexture);
         vfSprite.x = vfX;
         vfSprite.y = vfY;
@@ -243,31 +184,6 @@ class PixiLayer extends React.Component {
             }
         }
 
-        //Add glircle neighbors in cardinal directions
-        for (let i = 0; i < this.glircleObjects.length; i++) {
-            const center = this.glircleObjects[i];
-            const up = this.glircleObjects[i - COLS];
-            const down = this.glircleObjects[i + COLS];
-            const left = i % COLS > 0 ? this.glircleObjects[i - 1] : undefined;
-            const right = i % COLS < COLS - 1 ? this.glircleObjects[i + 1] : undefined;
-
-            if (up) {
-                center.neighbors.push(up);
-            }
-
-            if (down) {
-                center.neighbors.push(down);
-            }
-
-            if (left) {
-                center.neighbors.push(left);
-            }
-
-            if (right) {
-                center.neighbors.push(right);
-            }
-        }
-
         this.graphics = new PIXI.Graphics();
 
         this.mainStage = new PIXI.Container();
@@ -278,7 +194,7 @@ class PixiLayer extends React.Component {
 
         this.image = new GlircleImage(vfX, vfY,
             "logo512.png",
-            0, 127, 255);
+            97, 218, 251);
     }
 
     componentDidMount() {
@@ -303,6 +219,7 @@ class PixiLayer extends React.Component {
                 }}
                 ref={r => {this.canvas = r}}
                 className={'pixi'}
+                onMouseDown={this.mousePressed}
             >
             </div>
         )
